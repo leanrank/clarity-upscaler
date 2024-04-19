@@ -19,7 +19,7 @@ from cog import BasePredictor, Input, Path
 class Predictor(BasePredictor):
     def setup(self) -> None:
         """Load the model into memory to make running multiple predictions efficient"""
-        os.system("socat TCP6-LISTEN:8888,fork TCP4:127.0.0.1:7861 &")
+        os.system("socat TCP6-LISTEN:8888,fork TCP4:127.0.0.1:5000 &")
         os.environ['IGNORE_CMD_ARGS_ERRORS'] = '1'
         
         startup_timer = timer.startup_timer
