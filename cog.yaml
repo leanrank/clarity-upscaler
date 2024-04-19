@@ -3,6 +3,7 @@ build:
   system_packages:
     - "libgl1-mesa-glx"
     - "libglib2.0-0"
+    - "socat"
   python_version: "3.10.4"
   python_packages:
     - "torch==2.0.1"
