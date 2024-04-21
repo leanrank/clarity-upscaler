@@ -5,6 +5,7 @@ from modules import initialize
 from urllib.parse import urlparse
 from fastapi import FastAPI
 from io import BytesIO
+from typing import Union, List
 
 import os, json
 import numpy as np
@@ -13,8 +14,44 @@ import base64
 import uuid
 import time
 import cv2
+import boto3
 
+from botocore.exceptions import NoCredentialsError
 from cog import BasePredictor, Input, Path
+
+def upload_image_to_s3(
+    images: List[Union[bytes, str]],
+):
+    
+    session = boto3.Session(
+        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+        region_name=os.environ.get("AWS_DEFAULT_REGION"),
+    )
+    s3 = session.client("s3")
+    bucket_name = os.environ.get("AWS_S3_BUCKET_NAME")
+    urls = []
+
+    for idx, image in enumerate(images):
+        try:
+            object_key = f"public/playground/{uuid.uuid4()}.png" 
+            decoded_image_data = base64.b64decode(image)  # decode base64 image
+
+            s3.put_object(
+                Body=decoded_image_data,
+                Bucket=bucket_name,
+                Key=object_key,
+                ContentType="image/jpeg",
+            )
+            urls.append(f"https://artsmart-storage-bucket-v2.s3.amazonaws.com/{object_key}")
+            print(f"Upload Successful for image {object_key}")
+        except FileNotFoundError:
+            print("The file was not found")
+        except NoCredentialsError:
+            print("Credentials not available")
+    
+    return urls
+
 
 class Predictor(BasePredictor):
     def setup(self) -> None:
@@ -378,13 +415,17 @@ class Predictor(BasePredictor):
 
         outputs = []
 
-        for i, image in enumerate(resp.images):
-            seed = info.get("all_seeds", [])[i] or "unknown_seed"
-            gen_bytes = BytesIO(base64.b64decode(image))
-            filename = f"{seed}-{uuid.uuid1()}.png"
-            with open(filename, "wb") as f:
-                f.write(gen_bytes.getvalue())
-            outputs.append(Path(filename))
+        # for i, image in enumerate(resp.images):
+        #     seed = info.get("all_seeds", [])[i] or "unknown_seed"
+        #     gen_bytes = BytesIO(base64.b64decode(image))
+        #     filename = f"{seed}-{uuid.uuid1()}.png"
+
+            
+            # with open(filename, "wb") as f:
+            #     f.write(gen_bytes.getvalue())
+            # outputs.append(Path(filename))
+
+        outputs = upload_image_to_s3(resp.images)
         
         if custom_sd_model:
             os.remove(path_to_custom_checkpoint)
