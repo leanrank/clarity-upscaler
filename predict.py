@@ -157,7 +157,8 @@ class Predictor(BasePredictor):
                         }
                     ]
                 }
-            }
+            },
+            "script": "onediff_diffusion_model"
         }
         
         req = StableDiffusionImg2ImgProcessingAPI(**payload)
