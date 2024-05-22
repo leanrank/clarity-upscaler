@@ -18,8 +18,6 @@ build:
   run:
     - git config --global --add safe.directory /src
     - git clone https://github.com/philz1337x/stable-diffusion-webui-cog-init /stable-diffusion-webui
-    - git clone https://github.com/siliconflow/onediff.git
-    - ln -s "$(pwd)/onediff/onediff_sd_webui_extensions" "$(pwd)/stable-diffusion-webui/extensions/onediff_sd_webui_extensions"
     - cd /stable-diffusion-webui/repositories/generative-models && git checkout 9d759324 && cd -
     - pip install -U einops==0.7.0
     - python /stable-diffusion-webui/init_env.py --skip-torch-cuda-test
