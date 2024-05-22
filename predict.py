@@ -1,4 +1,3 @@
-
 from modules import timer
 from modules import initialize_util
 from modules import initialize
@@ -15,14 +14,17 @@ import uuid
 import time
 import cv2
 import boto3
+import random
+import re
 
 from botocore.exceptions import NoCredentialsError
 from cog import BasePredictor, Input, Path
 
+
 def upload_image_to_s3(
     images: List[Union[bytes, str]],
 ):
-    
+
     session = boto3.Session(
         aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
@@ -34,7 +36,7 @@ def upload_image_to_s3(
 
     for idx, image in enumerate(images):
         try:
-            object_key = f"public/playground/{uuid.uuid4()}.png" 
+            object_key = f"public/playground/{re.sub('0', str(random.randint(1, 9)), str(uuid.uuid4()))}.png"
             decoded_image_data = base64.b64decode(image)  # decode base64 image
 
             s3.put_object(
@@ -43,13 +45,15 @@ def upload_image_to_s3(
                 Key=object_key,
                 ContentType="image/jpeg",
             )
-            urls.append(f"https://artsmart-storage-bucket-v2.s3.amazonaws.com/{object_key}")
+            urls.append(
+                f"https://artsmart-storage-bucket-v2.s3.amazonaws.com/{object_key}"
+            )
             print(f"Upload Successful for image {object_key}")
         except FileNotFoundError:
             print("The file was not found")
         except NoCredentialsError:
             print("Credentials not available")
-    
+
     return urls
 
 
@@ -57,44 +61,44 @@ class Predictor(BasePredictor):
     def setup(self) -> None:
         """Load the model into memory to make running multiple predictions efficient"""
         os.system("socat TCP6-LISTEN:8888,fork TCP4:127.0.0.1:5000 &")
-        os.environ['IGNORE_CMD_ARGS_ERRORS'] = '1'
-        
+        os.environ["IGNORE_CMD_ARGS_ERRORS"] = "1"
+
         startup_timer = timer.startup_timer
         startup_timer.record("launcher")
-        
+
         initialize.imports()
         initialize.check_versions()
         initialize.initialize()
-        
+
         app = FastAPI()
         initialize_util.setup_middleware(app)
-        
+
         from modules.api.api import Api
         from modules.call_queue import queue_lock
-        
+
         self.api = Api(app, queue_lock)
-        
+
         model_response = self.api.get_sd_models()
         print("Available checkpoints: ", str(model_response))
 
         from modules import script_callbacks
+
         script_callbacks.before_ui_callback()
         script_callbacks.app_started_callback(None, app)
 
         from modules.api.models import StableDiffusionImg2ImgProcessingAPI
+
         self.StableDiffusionImg2ImgProcessingAPI = StableDiffusionImg2ImgProcessingAPI
 
         file_path = Path("init.png")
         base64_encoded_data = base64.b64encode(file_path.read_bytes())
-        base64_image = base64_encoded_data.decode('utf-8')
+        base64_image = base64_encoded_data.decode("utf-8")
 
-        
-        
         payload = {
-           "override_settings": {
+            "override_settings": {
                 "sd_model_checkpoint": "juggernaut_reborn.safetensors",
                 "sd_vae": "vae-ft-mse-840000-ema-pruned.safetensors",
-                 "CLIP_stop_at_last_layers": 1,
+                "CLIP_stop_at_last_layers": 1,
             },
             "override_settings_restore_afterwards": False,
             "prompt": "office building",
@@ -116,10 +120,10 @@ class Predictor(BasePredictor):
                         4,
                         8,
                         "4x-UltraSharp",
-                        1.1, 
-                        False, 
+                        1.1,
+                        False,
                         0,
-                        0.0, 
+                        0.0,
                         3,
                     ]
                 },
@@ -133,7 +137,6 @@ class Predictor(BasePredictor):
                         True,
                         True,
                     ]
-
                 },
                 "controlnet": {
                     "args": [
@@ -156,11 +159,11 @@ class Predictor(BasePredictor):
                             "processor_res": 512,
                         }
                     ]
-                }
+                },
             },
-            "script": "onediff_diffusion_model"
+            "script": "onediff_diffusion_model",
         }
-        
+
         req = StableDiffusionImg2ImgProcessingAPI(**payload)
         self.api.img2imgapi(req)
 
@@ -198,27 +201,33 @@ class Predictor(BasePredictor):
         with open(safetensors_path, "wb") as file:
             file.write(response.content)
 
-        print(f"Checkpoint downloading took {round(time.time() - start_time_custom, 2)} seconds")
+        print(
+            f"Checkpoint downloading took {round(time.time() - start_time_custom, 2)} seconds"
+        )
 
         return safetensors_path
 
     def calc_scale_factors(self, value):
         lst = []
-        while value >= 2: 
+        while value >= 2:
             lst.append(2)
-            value /= 2 
+            value /= 2
         if value > 1:
             lst.append(value)
         return lst
-    
+
     def predict(
         self,
         image: Path = Input(description="input image"),
-        prompt: str = Input(description="Prompt", default="masterpiece, best quality, highres, <lora:more_details:0.5> <lora:SDXLrender_v2.0:1>"),
-        negative_prompt: str = Input(description="Negative Prompt", default="(worst quality, low quality, normal quality:2) JuggernautNegative-neg"),
-        scale_factor: float = Input(
-            description="Scale factor", default=2
+        prompt: str = Input(
+            description="Prompt",
+            default="masterpiece, best quality, highres, <lora:more_details:0.5> <lora:SDXLrender_v2.0:1>",
         ),
+        negative_prompt: str = Input(
+            description="Negative Prompt",
+            default="(worst quality, low quality, normal quality:2) JuggernautNegative-neg",
+        ),
+        scale_factor: float = Input(description="Scale factor", default=2),
         dynamic: float = Input(
             description="HDR, try from 3 - 9", ge=1, le=50, default=6
         ),
@@ -230,22 +239,91 @@ class Predictor(BasePredictor):
         ),
         tiling_width: int = Input(
             description="Fractality, set lower tile width for a high Fractality",
-            choices=[16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256],
-            default=112
+            choices=[
+                16,
+                32,
+                48,
+                64,
+                80,
+                96,
+                112,
+                128,
+                144,
+                160,
+                176,
+                192,
+                208,
+                224,
+                240,
+                256,
+            ],
+            default=112,
         ),
         tiling_height: int = Input(
             description="Fractality, set lower tile height for a high Fractality",
-            choices=[16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256],
-            default=144
+            choices=[
+                16,
+                32,
+                48,
+                64,
+                80,
+                96,
+                112,
+                128,
+                144,
+                160,
+                176,
+                192,
+                208,
+                224,
+                240,
+                256,
+            ],
+            default=144,
         ),
         sd_model: str = Input(
             description="Stable Diffusion model checkpoint",
-            choices=['epicrealism_naturalSinRC1VAE.safetensors [84d76a0328]', 'juggernaut_reborn.safetensors [338b85bc4f]', 'flat2DAnimerge_v45Sharp.safetensors'],
+            choices=[
+                "epicrealism_naturalSinRC1VAE.safetensors [84d76a0328]",
+                "juggernaut_reborn.safetensors [338b85bc4f]",
+                "flat2DAnimerge_v45Sharp.safetensors",
+            ],
             default="juggernaut_reborn.safetensors [338b85bc4f]",
         ),
         scheduler: str = Input(
             description="scheduler",
-            choices=['DPM++ 2M Karras', 'DPM++ SDE Karras', 'DPM++ 2M SDE Exponential', 'DPM++ 2M SDE Karras', 'Euler a', 'Euler', 'LMS', 'Heun', 'DPM2', 'DPM2 a', 'DPM++ 2S a', 'DPM++ 2M', 'DPM++ SDE', 'DPM++ 2M SDE', 'DPM++ 2M SDE Heun', 'DPM++ 2M SDE Heun Karras', 'DPM++ 2M SDE Heun Exponential', 'DPM++ 3M SDE', 'DPM++ 3M SDE Karras', 'DPM++ 3M SDE Exponential', 'DPM fast', 'DPM adaptive', 'LMS Karras', 'DPM2 Karras', 'DPM2 a Karras', 'DPM++ 2S a Karras', 'Restart', 'DDIM', 'PLMS', 'UniPC'],
+            choices=[
+                "DPM++ 2M Karras",
+                "DPM++ SDE Karras",
+                "DPM++ 2M SDE Exponential",
+                "DPM++ 2M SDE Karras",
+                "Euler a",
+                "Euler",
+                "LMS",
+                "Heun",
+                "DPM2",
+                "DPM2 a",
+                "DPM++ 2S a",
+                "DPM++ 2M",
+                "DPM++ SDE",
+                "DPM++ 2M SDE",
+                "DPM++ 2M SDE Heun",
+                "DPM++ 2M SDE Heun Karras",
+                "DPM++ 2M SDE Heun Exponential",
+                "DPM++ 3M SDE",
+                "DPM++ 3M SDE Karras",
+                "DPM++ 3M SDE Exponential",
+                "DPM fast",
+                "DPM adaptive",
+                "LMS Karras",
+                "DPM2 Karras",
+                "DPM2 a Karras",
+                "DPM++ 2S a Karras",
+                "Restart",
+                "DDIM",
+                "PLMS",
+                "UniPC",
+            ],
             default="DPM++ 3M SDE Karras",
         ),
         num_inference_steps: int = Input(
@@ -255,39 +333,38 @@ class Predictor(BasePredictor):
             description="Random seed. Leave blank to randomize the seed", default=1337
         ),
         downscaling: bool = Input(
-            description="Downscale the image before upscaling. Can improve quality and speed for images with high resolution but lower quality", default=False
+            description="Downscale the image before upscaling. Can improve quality and speed for images with high resolution but lower quality",
+            default=False,
         ),
         downscaling_resolution: int = Input(
             description="Downscaling resolution", default=768
         ),
         lora_links: str = Input(
             description="Link to a lora file you want to use in your upscaling. Multiple links possible, seperated by comma",
-            default=""
+            default="",
         ),
-        custom_sd_model: str = Input(
-            default=""
-        )
+        custom_sd_model: str = Input(default=""),
     ) -> list[Path]:
         """Run a single prediction on the model"""
         print("Running prediction")
         start_time = time.time()
-        
+
         # checkpoint name changed bc hashing is deactivated so name is corrected here to old name to avoid breaking api calls
         if sd_model == "epicrealism_naturalSinRC1VAE.safetensors [84d76a0328]":
             sd_model = "epicrealism_naturalSinRC1VAE.safetensors"
         if sd_model == "juggernaut_reborn.safetensors [338b85bc4f]":
             sd_model = "juggernaut_reborn.safetensors"
-    
+
         if lora_links:
             lora_link = [link.strip() for link in lora_links.split(",")]
             for link in lora_link:
-                self.download_lora_weights(link) 
+                self.download_lora_weights(link)
 
         if custom_sd_model:
             path_to_custom_checkpoint = self.download_safetensors(custom_sd_model)
             sd_model = os.path.basename(path_to_custom_checkpoint)
             self.api.refresh_checkpoints()
-        
+
         image_file_path = image
 
         with open(image_file_path, "rb") as image_file:
@@ -299,40 +376,40 @@ class Predictor(BasePredictor):
             image = cv2.imdecode(image_np_array, cv2.IMREAD_UNCHANGED)
 
             height, width = image.shape[:2]
-            
+
             if height > width:
                 scaling_factor = downscaling_resolution / float(height)
             else:
                 scaling_factor = downscaling_resolution / float(width)
-            
+
             new_width = int(width * scaling_factor)
             new_height = int(height * scaling_factor)
 
             resized_image = cv2.resize(image, (new_width, new_height))
 
-            _, binary_resized_image = cv2.imencode('.jpg', resized_image)
+            _, binary_resized_image = cv2.imencode(".jpg", resized_image)
             binary_image_data = binary_resized_image.tobytes()
 
         base64_encoded_data = base64.b64encode(binary_image_data)
-        base64_image = base64_encoded_data.decode('utf-8')
+        base64_image = base64_encoded_data.decode("utf-8")
 
         multipliers = [scale_factor]
         if scale_factor > 2:
             multipliers = self.calc_scale_factors(scale_factor)
             print("Upscale your image " + str(len(multipliers)) + " times")
-        
+
         first_iteration = True
 
         for multiplier in multipliers:
             print("Upscaling with scale_factor: ", multiplier)
-            
+
             if not first_iteration:
                 creativity = creativity * 0.8
                 tiling_width = tiling_width + 16
                 tiling_width = max(256, tiling_width)
                 tiling_height = tiling_height + 16
                 tiling_height = max(256, tiling_height)
-                
+
             first_iteration = False
 
             payload = {
@@ -365,10 +442,10 @@ class Predictor(BasePredictor):
                             4,
                             8,
                             "4x-UltraSharp",
-                            multiplier, 
-                            False, 
+                            multiplier,
+                            False,
                             0,
-                            0.0, 
+                            0.0,
                             3,
                         ]
                     },
@@ -404,8 +481,8 @@ class Predictor(BasePredictor):
                                 "processor_res": 512,
                             }
                         ]
-                    }
-                }
+                    },
+                },
             }
 
             req = self.StableDiffusionImg2ImgProcessingAPI(**payload)
@@ -421,17 +498,15 @@ class Predictor(BasePredictor):
         #     gen_bytes = BytesIO(base64.b64decode(image))
         #     filename = f"{seed}-{uuid.uuid1()}.png"
 
-            
-            # with open(filename, "wb") as f:
-            #     f.write(gen_bytes.getvalue())
-            # outputs.append(Path(filename))
+        # with open(filename, "wb") as f:
+        #     f.write(gen_bytes.getvalue())
+        # outputs.append(Path(filename))
 
         outputs = upload_image_to_s3(resp.images)
-        
+
         if custom_sd_model:
             os.remove(path_to_custom_checkpoint)
             print(f"Custom checkpoint {path_to_custom_checkpoint} has been removed.")
 
         print(f"Prediction took {round(time.time() - start_time,2)} seconds")
         return outputs
-    
