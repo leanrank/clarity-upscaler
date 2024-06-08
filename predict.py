@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI
 from io import BytesIO
 from typing import Union, List
+from PIL import Image, ImageFilter
 
 import os, json
 import numpy as np
@@ -16,6 +17,7 @@ import cv2
 import boto3
 import random
 import re
+import mimetypes
 
 from botocore.exceptions import NoCredentialsError
 from cog import BasePredictor, Input, Path
@@ -55,6 +57,17 @@ def upload_image_to_s3(
             print("Credentials not available")
 
     return urls
+
+
+from handfix.handfix import (
+    detect_and_crop_hand_from_binary,
+    insert_cropped_hand_into_image,
+)
+
+mimetypes.add_type("image/webp", ".webp")
+
+# Fixing the "DecompressionBombWarning" warning
+Image.MAX_IMAGE_PIXELS = None
 
 
 class Predictor(BasePredictor):
@@ -343,6 +356,26 @@ class Predictor(BasePredictor):
             default="",
         ),
         custom_sd_model: str = Input(default=""),
+        sharpen: float = Input(
+            description="Sharpen the image after upscaling. The higher the value, the more sharpening is applied. 0 for no sharpening",
+            ge=0,
+            le=10,
+            default=0,
+        ),
+        mask: Path = Input(
+            description="Mask image to mark areas that should be preserved during upscaling",
+            default=None,
+        ),
+        handfix: str = Input(
+            description="Use clarity to fix hands in the image",
+            choices=["disabled", "hands_only", "image_and_hands"],
+            default="disabled",
+        ),
+        output_format: str = Input(
+            description="Format of the output images",
+            choices=["webp", "jpg", "png"],
+            default="png",
+        ),
     ) -> list[Path]:
         """Run a single prediction on the model"""
         print("Running prediction")
@@ -369,6 +402,10 @@ class Predictor(BasePredictor):
         with open(image_file_path, "rb") as image_file:
             binary_image_data = image_file.read()
 
+        if mask:
+            with Image.open(image_file_path) as img:
+                original_resolution = img.size
+
         if downscaling:
             image_np_array = np.frombuffer(binary_image_data, dtype=np.uint8)
 
@@ -389,6 +426,24 @@ class Predictor(BasePredictor):
             _, binary_resized_image = cv2.imencode(".jpg", resized_image)
             binary_image_data = binary_resized_image.tobytes()
 
+        if handfix == "hands_only":
+            print("Trying to fix hands")
+            binary_image_data_full_image = binary_image_data
+            cropped_hand_img, hand_coords = detect_and_crop_hand_from_binary(
+                binary_image_data_full_image
+            )
+            if cropped_hand_img is not None:
+                print("Hands detected")
+                _, buffer = cv2.imencode(".jpg", cropped_hand_img)
+                binary_image_data = buffer.tobytes()
+
+                cropped_hand_img_rgb = cv2.cvtColor(cropped_hand_img, cv2.COLOR_BGR2RGB)
+                cropped_hand_img_pil = Image.fromarray(cropped_hand_img_rgb)
+
+            else:
+                print("No hands detected")
+                return
+
         base64_encoded_data = base64.b64encode(binary_image_data)
         base64_image = base64_encoded_data.decode("utf-8")
 
@@ -404,10 +459,7 @@ class Predictor(BasePredictor):
 
             if not first_iteration:
                 creativity = creativity * 0.8
-                tiling_width = tiling_width + 16
-                tiling_width = max(256, tiling_width)
-                tiling_height = tiling_height + 16
-                tiling_height = max(256, tiling_height)
+                seed = seed + 1
 
             first_iteration = False
 
@@ -490,16 +542,65 @@ class Predictor(BasePredictor):
 
             base64_image = resp.images[0]
 
-        outputs = []
+            outputs = []
 
-        # for i, image in enumerate(resp.images):
-        #     seed = info.get("all_seeds", [])[i] or "unknown_seed"
-        #     gen_bytes = BytesIO(base64.b64decode(image))
-        #     filename = f"{seed}-{uuid.uuid1()}.png"
+            for i, image in enumerate(resp.images):
+                seed = info.get("all_seeds", [])[i] or "unknown_seed"
 
-        # with open(filename, "wb") as f:
-        #     f.write(gen_bytes.getvalue())
-        # outputs.append(Path(filename))
+                gen_bytes = BytesIO(base64.b64decode(image))
+                imageObject = Image.open(gen_bytes)
+
+                if handfix == "hands_only":
+                    imageObject = insert_cropped_hand_into_image(
+                        binary_image_data_full_image,
+                        imageObject,
+                        hand_coords,
+                        cropped_hand_img_pil,
+                    )
+
+                if mask:
+                    imageObject = imageObject.resize(original_resolution, Image.LANCZOS)
+                    original_image = Image.open(image_file_path).resize(
+                        original_resolution, Image.LANCZOS
+                    )
+                    mask_image = (
+                        Image.open(mask)
+                        .convert("L")
+                        .resize(original_resolution, Image.LANCZOS)
+                    )
+
+                    blur_radius = 5
+                    mask_image = mask_image.filter(
+                        ImageFilter.GaussianBlur(blur_radius)
+                    )
+                    combined_image = Image.composite(
+                        original_image, imageObject, mask_image
+                    )
+
+                    imageObject = combined_image
+
+                if sharpen > 0:
+                    a = -sharpen / 10
+                    b = 1 - 8 * a
+                    kernel = [a, a, a, a, b, a, a, a, a]
+                    kernel_filter = ImageFilter.Kernel(
+                        (3, 3), kernel, scale=1, offset=0
+                    )
+
+                    imageObject = imageObject.filter(kernel_filter)
+
+                optimised_file_path = Path(f"{seed}-{uuid.uuid1()}.{output_format}")
+
+                if output_format in ["webp", "jpg"]:
+                    imageObject.save(
+                        optimised_file_path,
+                        quality=95,
+                        optimize=True,
+                    )
+                else:
+                    imageObject.save(optimised_file_path)
+
+                outputs.append(optimised_file_path)
 
         outputs = upload_image_to_s3(resp.images)
 
