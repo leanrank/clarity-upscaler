@@ -16,6 +16,7 @@ build:
     - "gdown==5.1.0"
     - "boto3==1.28.40"
     - "mediapipe==0.10.14"
+    - "setuptools<70"
   run:
     - git config --global --add safe.directory /src
     - git clone https://github.com/philz1337x/stable-diffusion-webui-cog-init /stable-diffusion-webui
