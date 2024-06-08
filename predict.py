@@ -620,7 +620,7 @@ class Predictor(BasePredictor):
                 # else:
                 #     imageObject.save(optimised_file_path)
 
-                outputs.append(img_to_buffer(imageObject, output_format))
+                outputs.append(imageObject)
 
         outputs = upload_image_to_s3(outputs)
 
