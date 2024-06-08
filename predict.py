@@ -23,6 +23,23 @@ from botocore.exceptions import NoCredentialsError
 from cog import BasePredictor, Input, Path
 
 
+def img_to_buffer(img, output_format="PNG", output_quality=75, output_lossless=False):
+    buffered = BytesIO()
+    if output_format.upper() == "PNG":
+        img.save(buffered, format=output_format)
+    elif output_format.upper() == "WEBP":
+        img.save(
+            buffered,
+            format=output_format,
+            quality=output_quality,
+            lossless=output_lossless,
+        )
+    else:
+        img.save(buffered, format=output_format, quality=output_quality)
+    buffered.seek(0)
+    return buffered
+
+
 def upload_image_to_s3(
     images: List[Union[bytes, str]],
 ):
@@ -39,7 +56,10 @@ def upload_image_to_s3(
     for idx, image in enumerate(images):
         try:
             object_key = f"public/playground/{re.sub('0', str(random.randint(1, 9)), str(uuid.uuid4()))}.png"
-            decoded_image_data = base64.b64decode(image)  # decode base64 image
+            if isinstance(image, str):
+                decoded_image_data = base64.b64decode(image)  # decode base64 image
+            else:
+                decoded_image_data = img_to_buffer(image)
 
             s3.put_object(
                 Body=decoded_image_data,
@@ -591,16 +611,16 @@ class Predictor(BasePredictor):
 
                 optimised_file_path = Path(f"{seed}-{uuid.uuid1()}.{output_format}")
 
-                if output_format in ["webp", "jpg"]:
-                    imageObject.save(
-                        optimised_file_path,
-                        quality=95,
-                        optimize=True,
-                    )
-                else:
-                    imageObject.save(optimised_file_path)
+                # if output_format in ["webp", "jpg"]:
+                #     imageObject.save(
+                #         optimised_file_path,
+                #         quality=95,
+                #         optimize=True,
+                #     )
+                # else:
+                #     imageObject.save(optimised_file_path)
 
-                outputs.append(optimised_file_path)
+                outputs.append(img_to_buffer(imageObject, output_format))
 
         outputs = upload_image_to_s3(resp.images)
 
