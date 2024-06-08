@@ -622,7 +622,7 @@ class Predictor(BasePredictor):
 
                 outputs.append(img_to_buffer(imageObject, output_format))
 
-        outputs = upload_image_to_s3(resp.images)
+        outputs = upload_image_to_s3(outputs)
 
         if custom_sd_model:
             os.remove(path_to_custom_checkpoint)
