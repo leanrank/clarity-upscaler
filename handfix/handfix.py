@@ -4,17 +4,18 @@ import mediapipe as mp
 from io import BytesIO
 from PIL import Image, ImageFilter, ImageDraw
 
+
 def detect_and_crop_hand_from_binary(binary_image_data):
     mp_hands = mp.solutions.hands
     hands = mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5)
-    
+
     # Convert binary data to a NumPy array
     np_arr = np.frombuffer(binary_image_data, np.uint8)
     img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    
+
     if img is None:
         raise ValueError("Failed to decode image from binary data.")
-    
+
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     results = hands.process(img_rgb)
 
@@ -26,11 +27,11 @@ def detect_and_crop_hand_from_binary(binary_image_data):
                 x, y = int(lm.x * w), int(lm.y * h)
                 x_list.append(x)
                 y_list.append(y)
-            
+
             # Calculate the bounding box
             min_x, min_y = min(x_list), min(y_list)
             max_x, max_y = max(x_list), max(y_list)
-            
+
             # Increase the size of the bounding box by 50%
             width, height = max_x - min_x, max_y - min_y
             min_x = max(0, min_x - int(width * 0.25))
@@ -43,7 +44,7 @@ def detect_and_crop_hand_from_binary(binary_image_data):
                 center_x = (min_x + max_x) // 2
                 min_x = max(0, center_x - 256)
                 max_x = min(w, center_x + 256)
-            
+
             if (max_y - min_y) < 512:
                 center_y = (min_y + max_y) // 2
                 min_y = max(0, center_y - 256)
@@ -56,7 +57,7 @@ def detect_and_crop_hand_from_binary(binary_image_data):
                     min_x = max(0, w - 512)
                 else:
                     max_x = min(w, min_x + 512)
-            
+
             if max_y - min_y < 512:
                 if min_y == 0:
                     max_y = min(h, 512)
@@ -68,8 +69,9 @@ def detect_and_crop_hand_from_binary(binary_image_data):
             cropped_img = img[min_y:max_y, min_x:max_x]
 
             return cropped_img, (min_x, min_y, max_x, max_y)
-    
+
     return None, None
+
 
 def create_mask(image):
     if isinstance(image, str):
@@ -77,7 +79,9 @@ def create_mask(image):
     elif isinstance(image, Image.Image):
         img = image
     else:
-        raise ValueError("Invalid input. Please provide an image file path or a PIL Image object.")
+        raise ValueError(
+            "Invalid input. Please provide an image file path or a PIL Image object."
+        )
 
     np.array(img)
 
@@ -105,14 +109,22 @@ def create_mask(image):
 
     return mask
 
+
 def combine_hands(orig_hands, img_hands_post, mask):
     src1 = np.array(orig_hands)
     src2 = np.array(img_hands_post)
     mask1 = np.array(mask)
     mask1 = mask1 / 255
+
+    # Ensure both source images and the mask have the same dimensions
+    height, width, _ = src1.shape
+    src2 = cv2.resize(src2, (width, height))
+    mask1 = cv2.resize(mask1, (width, height))
     dst = src2 * mask1 + src1 * (1 - mask1)
+
     smooth_face = Image.fromarray(dst.astype(np.uint8))
-    return  smooth_face
+    return smooth_face
+
 
 def insert_image(reference_image, small_image, top, left):
     small_width, small_height = small_image.size
@@ -120,12 +132,17 @@ def insert_image(reference_image, small_image, top, left):
     reference_image.paste(small_image, box)
     return reference_image
 
-def insert_cropped_hand_into_image(original_img_data, cropped_img_object, coords, cropped_hand_img_pil, scale_factor=2):
+
+def insert_cropped_hand_into_image(
+    original_img_data, cropped_img_object, coords, cropped_hand_img_pil, scale_factor=2
+):
     original_img = Image.open(BytesIO(original_img_data)).convert("RGBA")
 
     cropped_img = cropped_img_object
-    cropped_img = cropped_img.resize((cropped_img.width // scale_factor, cropped_img.height // scale_factor))
-    
+    cropped_img = cropped_img.resize(
+        (cropped_img.width // scale_factor, cropped_img.height // scale_factor)
+    )
+
     mask = create_mask(cropped_img)
 
     img_smooth_hands = combine_hands(cropped_hand_img_pil, cropped_img, mask)
