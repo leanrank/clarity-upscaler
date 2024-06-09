@@ -115,13 +115,7 @@ def combine_hands(orig_hands, img_hands_post, mask):
     src2 = np.array(img_hands_post)
     mask1 = np.array(mask)
     mask1 = mask1 / 255
-
-    # Ensure both source images and the mask have the same dimensions
-    height, width, _ = src1.shape
-    src2 = cv2.resize(src2, (width, height))
-    mask1 = cv2.resize(mask1, (width, height))
     dst = src2 * mask1 + src1 * (1 - mask1)
-
     smooth_face = Image.fromarray(dst.astype(np.uint8))
     return smooth_face
 
